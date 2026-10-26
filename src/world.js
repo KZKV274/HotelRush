@@ -22,6 +22,9 @@ export const SPOT = {
   coffee: new THREE.Vector3(0.6, 0, -2.6),
 };
 // Queue in front of the desk: slot 0 is at the counter
+// The part of the lobby that must always be on screen: staff corner, desk and queue, lift, lounge and the front door
+const FIT_POINTS = [[-3.7, 0, -2.9], [-3.7, 1.3, -2.9], [3.2, 1.3, -2.9], [3.6, 0, -2.6], [-3.8, 0, 0.6], [-2.8, 0, 0.4], [3.8, 0, 2.6], [1.6, 0, 1.9]]
+  .map(([x, y, z]) => new THREE.Vector3(x, y, z));
 // Queue along the counter; odd slots get their bubble a bit higher so bubbles never overlap
 export const SLOTS = [[-2.35, -0.62], [-1.45, -0.62], [-0.55, -0.62], [0.35, -0.62]].map(([x, z]) => new THREE.Vector3(x, 0, z));
 export const WAIT_SPOTS = [[1.9, -1.6], [1.5, -0.9], [2.2, -0.6], [1.1, -1.7]].map(([x, z]) => new THREE.Vector3(x, 0, z));
@@ -37,8 +40,7 @@ export class World {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera(-5, 5, 5, -5, 0.1, 100);
-    this.zoom = 1.6;
-    this.focus(new THREE.Vector3(0.65, 0, -0.85));
+    this.focus(new THREE.Vector3(0, 0, 0));
     this.clock = new THREE.Clock();
     this.raycaster = new THREE.Raycaster();
     this.lights();
@@ -174,8 +176,7 @@ export class World {
 
   // Menu view: the lobby moves up and gets smaller so the menu sheet does not cover it
   setMenuView(on) {
-    this.shiftY = on ? 0.45 : 0;
-    this.zoom = on ? 1.3 : 1.6;
+    this.menu = on;
     this.resize();
   }
 
@@ -196,9 +197,17 @@ export class World {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     if (!w || !h) return;
     this.renderer.setSize(w, h, false);
-    const aspect = w / h, halfW = (aspect < 1 ? 5.3 : 5.3 * Math.min(1.6, aspect)) / this.zoom;
-    const halfH = halfW / aspect, d = (this.shiftY || 0) * halfH;
-    Object.assign(this.camera, { left: -halfW, right: halfW, top: halfH - d, bottom: -halfH - d });
+    // Fit the important part of the lobby into the free area of the screen, whatever its shape:
+    // below the top HUD during a shift, into the upper part above the menu sheet otherwise
+    this.camera.updateMatrixWorld();
+    const inv = this.camera.matrixWorldInverse, min = new THREE.Vector2(Infinity, Infinity), max = new THREE.Vector2(-Infinity, -Infinity);
+    for (const p of FIT_POINTS) { const v = p.clone().applyMatrix4(inv); min.min(v); max.max(v); }
+    const pad = 0.25, topPx = this.menu ? 8 : 92, areaH = this.menu ? h * 0.4 : h - topPx - 14;
+    const sizeX = max.x - min.x + pad * 2, sizeY = max.y - min.y + pad * 2;
+    const upp = Math.max(sizeX / w, sizeY / Math.max(60, areaH));
+    const cx = (min.x + max.x) / 2;
+    const top = max.y + pad + topPx * upp + (areaH * upp - sizeY) / 2;
+    Object.assign(this.camera, { left: cx - w * upp / 2, right: cx + w * upp / 2, top, bottom: top - h * upp });
     this.camera.updateProjectionMatrix();
   }
 

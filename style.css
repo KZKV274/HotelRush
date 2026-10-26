@@ -18,7 +18,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 #loading p{color:var(--muted);font-size:13px;margin:0}
 
 /* top hud */
-#hud-top{position:absolute;left:0;right:0;top:0;padding:calc(10px + env(safe-area-inset-top)) 10px 0;display:grid;grid-template-columns:auto 1fr auto auto;gap:6px;align-items:start;pointer-events:none}
+#hud-top{position:absolute;left:0;right:0;top:0;max-width:640px;margin:0 auto;padding:calc(10px + env(safe-area-inset-top)) 10px 0;display:grid;grid-template-columns:auto 1fr auto auto;gap:6px;align-items:start;pointer-events:none}
 #hud-top:empty{display:none}
 .hud-pill{pointer-events:auto;display:flex;align-items:center;gap:5px;background:rgba(18,22,32,.82);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:14px;padding:7px 10px;font-weight:800;font-size:15px;min-height:38px;position:relative}
 .hud-pill small{color:var(--muted);font-size:11px;font-weight:700}
