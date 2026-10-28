@@ -1,5 +1,5 @@
 /* Hotel Rush offline cache: app files network-first, models and the 3D library cache-first */
-const CACHE = "hotelrush-v2";
+const CACHE = "hotelrush-v3";
 const CORE = ["./", "./index.html", "./style.css", "./manifest.json", "./src/main.js", "./src/world.js", "./src/game.js", "./src/data.js", "./src/sound.js", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
