@@ -356,16 +356,29 @@ export class World {
     return g;
   }
   // A taxi drives up to the entrance, drops a guest and leaves
-  taxiArrive(onStop) {
+  taxiArrive(onStop) { return this.vehicleArrive("taxi", onStop); }
+  vehicleArrive(kind, onStop) {
     if (this.taxiBusy) return false;
     this.taxiBusy = true;
-    const t = this.taxi;
+    if (kind === "bus" && !this.bus) { this.bus = this.makeBus(); this.scene.add(this.bus); }
+    const t = kind === "bus" ? this.bus : this.taxi;
     t.visible = true; t.position.set(STREET_X, 0, -14); t.rotation.y = 0;
     this.tween(t.position, "z", TAXI_STOP, 1.6, () => {
       onStop && onStop();
-      setTimeout(() => this.tween(t.position, "z", 16, 1.8, () => { t.visible = false; this.taxiBusy = false; }), 900);
+      setTimeout(() => this.tween(t.position, "z", 16, 1.8, () => { t.visible = false; this.taxiBusy = false; }), kind === "bus" ? 4200 : 900);
     });
     return true;
+  }
+  makeBus() {
+    const g = new THREE.Group(), body = mat(0x2e86de, { roughness: 0.45 }), dark = mat(0x1d2433, { roughness: 0.2, metalness: 0.4 });
+    g.add(box(0.66, 0.5, 2.0, body, 0, 0.42, 0));
+    g.add(box(0.68, 0.2, 1.7, dark, 0, 0.52, 0.05));
+    g.add(box(0.68, 0.06, 2.02, mat(0xffffff), 0, 0.25, 0));
+    g.add(box(0.5, 0.06, 0.02, mat(0xfff6d0, { emissive: 0xffe08a }), 0, 0.26, 1.01));
+    const wheel = new THREE.CylinderGeometry(0.13, 0.13, 0.08, 14), tire = mat(0x15171c);
+    for (const [wx, wz] of [[-0.33, 0.65], [0.33, 0.65], [-0.33, -0.65], [0.33, -0.65]]) { const w = new THREE.Mesh(wheel, tire); w.rotation.z = Math.PI / 2; w.position.set(wx, 0.13, wz); g.add(w); }
+    g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+    return g;
   }
   tween(obj, key, to, dur, done) { this.anims.push({ obj, key, from: obj[key], to, dur, t: 0, done }); }
 
@@ -706,7 +719,9 @@ export class Actor {
     if (!this.label) return;
     this.label.style.visibility = this.root.visible ? "" : "hidden";
     const p = this.world.toScreen(this.root.position.clone().add(new THREE.Vector3(0, 1.05, 0)));
-    this.label.style.transform = `translate(${p.x}px, ${p.y - (this.labelLift || 0)}px) translate(-50%, -100%)`;
+    // keep the bubble on screen and out from under the top bar
+    const w = this.world.canvas.clientWidth, x = Math.max(34, Math.min(w - 34, p.x)), y = Math.max(this.world.menu ? 40 : 128, p.y - (this.labelLift || 0));
+    this.label.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
   }
   screenPos(h = 0.6) { return this.world.toScreen(this.root.position.clone().add(new THREE.Vector3(0, h, 0))); }
 

@@ -197,3 +197,14 @@ button{font:inherit;color:inherit;cursor:pointer}
 .res-stars span{animation:starPop .45s cubic-bezier(.2,1.6,.4,1) both}
 @keyframes starPop{from{opacity:0;transform:scale(.2) rotate(-40deg)}to{opacity:1;transform:none}}
 .result.win .res-ic{animation:starPop .6s cubic-bezier(.2,1.6,.4,1) both}
+
+/* v2.1: banners, quick bonus, streak, timer warning */
+.banner{position:absolute;left:50%;top:132px;transform:translateX(-50%);background:linear-gradient(135deg,#ffc94d,#ff9f43);color:#2b1a00;font-weight:900;font-size:15px;padding:9px 16px;border-radius:99px;box-shadow:0 10px 30px rgba(0,0,0,.4);white-space:nowrap;display:flex;gap:7px;align-items:center;animation:bannerIn 2.6s ease forwards;z-index:3}
+@keyframes bannerIn{0%{opacity:0;transform:translate(-50%,-20px) scale(.85)}10%{opacity:1;transform:translate(-50%,0) scale(1.05)}16%{transform:translate(-50%,0) scale(1)}85%{opacity:1}100%{opacity:0;transform:translate(-50%,-14px)}}
+.fx.quick{font-size:13px;color:#7dffb8;display:flex;gap:3px;align-items:center;white-space:nowrap}
+.dot.gold{border-color:rgba(255,201,77,.5)}
+.dot.gold.on{background:var(--gold);border-color:var(--gold)}
+.staffbar .streak{margin-left:auto;color:var(--gold)}
+.hud-pill.low{color:#ff8e99;border-color:rgba(255,93,108,.6);animation:pulseRed 1s infinite}
+@keyframes pulseRed{50%{background:rgba(120,20,30,.85)}}
+.small-card .opts{margin:2px 0 4px}

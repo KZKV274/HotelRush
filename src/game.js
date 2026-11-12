@@ -4,14 +4,14 @@ import { SPOT, SLOTS, CHARS } from "./world.js";
 import { FLOORS, TYPE_SHORT, TYPE_NAME, PRICE, WEIGHT, ISSUES, QUESTIONS, NIGHT_QUESTIONS } from "./data.js";
 import * as sfx from "./sound.js";
 
-const SAVE_KEY = "hotelrush_save";
+const SAVE_KEY = "hotelrush_save", VERSION = "2.1";
 const SHIFT = 150, DESK = 4, FIX = 5, MAX_CALLS = 2;
-const RECEPTIONIST = "male-e", TECH = "male-f", MAIDS = ["female-b", "female-d", "female-a", "female-f"];
+const RECEPTIONIST = "male-e", TECHS = ["male-f", "male-d"], MAIDS = ["female-b", "female-d", "female-a", "female-f"];
 const GUESTS = CHARS.filter(c => c !== RECEPTIONIST);
 const BAG_COLORS = [0xc0392b, 0x2e86de, 0x27ae60, 0x8e44ad, 0xf39c12, 0x34495e, 0xe84393];
 const V = (x, z) => new THREE.Vector3(x, 0, z);
 const MAID_HOME = [[-3.35, -2.05], [-3.0, -2.45], [-3.45, -1.55], [-2.95, -1.8]].map(([x, z]) => V(x, z));
-const TECH_HOME = V(-3.4, -0.85);
+const TECH_HOMES = [V(-3.4, -0.85), V(-3.35, -0.1)];
 const BACK_LANE = [V(-2.9, -2.3), V(2.0, -2.3)];
 const FRONT_TURN = V(0.3, 2.3);
 const MID = V(1.0, -0.35); // between the lift and the queue, clear of the counter
@@ -24,9 +24,17 @@ export const UPGRADES = {
   speed: { icon: "bolt", name: "Быстрая уборка", now: l => `Уборка ${String(cleanTime(l)).replace(".", ",")} с`, next: l => `станет ${String(cleanTime(l + 1)).replace(".", ",")} с`, prices: [700, 1600] },
   coffee: { icon: "cup", name: "Кофемашина в лобби", now: l => (l ? `Терпение +${l * 20}%` : "Нет"), next: l => `терпение гостей +${(l + 1) * 20}%`, prices: [800, 1800] },
   floor: { icon: "building", name: "Новый этаж", now: l => `Номеров: ${8 + 4 * l}`, next: l => `станет ${12 + 4 * l}`, prices: [1200, 2600] },
+  promo: { icon: "mega", name: "Реклама отеля", now: l => (l ? `Цены +${l * 15}%` : "Нет"), next: l => `цены номеров +${(l + 1) * 15}%`, prices: [1500, 3200] },
+  tech: { icon: "wrench", name: "Второй техник", now: l => `Техников: ${1 + l}`, next: () => "станет 2", prices: [2200] },
 };
+const NO_UPGRADES = () => ({ maid: 0, speed: 0, coffee: 0, floor: 0, promo: 0, tech: 0 });
 const isNight = day => day % 3 === 0;
-const goalFor = day => Math.round((isNight(day) ? 280 + 65 * (day - 1) : 450 + 170 * (day - 1)) / 10) * 10;
+// The goal grows fast for the first ten days and slowly afterwards, so the career never hits a wall
+const goalFor = day => {
+  const d = Math.min(day, 10) - 1, extra = Math.max(0, day - 10);
+  return Math.round((isNight(day) ? 280 + 65 * d + 30 * extra : 450 + 170 * d + 60 * extra) / 10) * 10;
+};
+const FINAL_DAY = 20;
 
 // Achievements: id, title, description, test against the career save
 const ACHIEVEMENTS = [
@@ -42,6 +50,8 @@ const ACHIEVEMENTS = [
   ["day10", "Ветеран", "Дойти до 10-го дня", s => s.day >= 10],
   ["rich", "Магнат", "Накопить 10 000 в кошельке", s => s.wallet >= 10000],
   ["full", "Отель мечты", "Купить все улучшения", s => Object.entries(UPGRADES).every(([k, u]) => s.up[k] >= u.prices.length)],
+  ["boss", "Управляющий отелем", "Пройти 20 дней", s => s.day > FINAL_DAY],
+  ["bus", "Туристический сезон", "Заселить всех гостей из автобуса", s => s.stats.buses >= 1],
 ];
 
 /* ---------- icons ---------- */
@@ -62,6 +72,9 @@ const P = {
   building: '<path d="M4 21V5l8-3 8 3v16M9 9h1M14 9h1M9 13h1M14 13h1M10 21v-4h4v4"/>',
   bed: '<path d="M3 18V7M3 13h18v5M21 13a3 3 0 0 0-3-3h-7v3M7 12a2 2 0 1 0 0-.1"/>',
   check: '<path d="m5 12 5 5 9-10"/>',
+  mega: '<path d="M3 11v2a1 1 0 0 0 1 1h3l7 4V6l-7 4H4a1 1 0 0 0-1 1zM17 9a4 4 0 0 1 0 6"/>',
+  bus: '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M3 11h18M7 17v2M17 17v2M8 14h.01M16 14h.01"/>',
+  fast: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
   sound: '<path d="M4 9h4l5-4v14l-5-4H4zM17 9a4 4 0 0 1 0 6"/>',
   music: '<path d="M9 18V5l11-2v13M9 18a3 3 0 1 1-3-3 3 3 0 0 1 3 3zM20 16a3 3 0 1 1-3-3 3 3 0 0 1 3 3z"/>',
   vibe: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M3 8v8M21 8v8"/>',
@@ -82,9 +95,9 @@ function loadSave() {
   // First launch: continue the career from the FrontDesk mini game (same site, same storage)
   if (!s) { try { const fd = JSON.parse(localStorage.getItem("frontdesk_game_v2") || "null"); if (fd && fd.day > 1) s = { ...fd, imported: true }; } catch {} }
   s = { day: 1, wallet: 0, best: 0, guests: 0, passed: 0, seenHelp: false, tutorialDone: false, ...(s || {}) };
-  s.up = { maid: 0, speed: 0, coffee: 0, floor: 0, ...(s.up || {}) };
+  s.up = { ...NO_UPGRADES(), ...(s.up || {}) };
   s.settings = { sound: s.sound !== false, music: true, vibe: true, quality: "high", ...(s.settings || {}) };
-  s.stats = { served: s.guests || 0, vips: 0, upgrades: 0, answers: 0, fixes: 0, perfect: 0, nights: 0, ...(s.stats || {}) };
+  s.stats = { served: s.guests || 0, vips: 0, upgrades: 0, answers: 0, fixes: 0, perfect: 0, nights: 0, buses: 0, ...(s.stats || {}) };
   s.ach = { ...(s.ach || {}) };
   if (s.day > 1) s.tutorialDone = true;
   return s;
@@ -105,7 +118,7 @@ export class Game {
     this.g = null;
     this.sel = null;
     this.tut = null;
-    this.staff = { maids: [], tech: null, receptionist: null };
+    this.staff = { maids: [], techs: [], receptionist: null };
     this.calls = [];
     this.bindInput();
     this.setupLobby();
@@ -130,18 +143,18 @@ export class Game {
       a.face(V(0, 0));
       this.staff.maids.push({ actor: a, home: MAID_HOME[i], busy: false });
     }
-    if (!this.staff.tech) {
-      const a = w.spawn(TECH, TECH_HOME, { hat: "tech", toolbox: true });
+    while (this.staff.techs.length < 1 + this.save.up.tech) {
+      const i = this.staff.techs.length, a = w.spawn(TECHS[i], TECH_HOMES[i], { hat: "tech", toolbox: true });
       a.face(V(0, 1));
-      this.staff.tech = { actor: a, home: TECH_HOME, busy: false };
+      this.staff.techs.push({ actor: a, home: TECH_HOMES[i], busy: false, tech: true });
     }
     w.setKeys(Array.from({ length: 8 + 4 * this.save.up.floor }, () => true));
   }
   resetStaff() {
     const want = 2 + this.save.up.maid;
-    for (const m of [...this.staff.maids, this.staff.tech]) {
+    for (const m of [...this.staff.maids, ...this.staff.techs]) {
       m.busy = false; m.actor.path = []; m.actor.root.position.copy(m.home); m.actor.play("idle"); m.actor.face(V(0, 0));
-      m.actor.root.visible = m === this.staff.tech ? this.save.day >= 3 : this.staff.maids.indexOf(m) < want;
+      m.actor.root.visible = m.tech ? this.save.day >= 3 && this.staff.techs.indexOf(m) <= this.save.up.tech : this.staff.maids.indexOf(m) < want;
     }
   }
   bossNod() {
@@ -160,7 +173,8 @@ export class Game {
     rooms.forEach(r => { if (Math.random() < (night ? 0.45 : 0.4)) Object.assign(r, { state: "occupied", from: -30, until: night ? 999 : 6 + Math.random() * 40 }); });
     this.g = {
       day, night, goal: goalFor(day), t: 0, money: 0, stars: 5, served: 0, checkouts: 0, answers: 0, upgrades: 0, vips: 0, fixes: 0, lost: 0, streak: 0,
-      nextSpawn: 1.2, nextIssue: 20, asked: new Set(), paused: false, over: false, clockAt: -1,
+      nextSpawn: 1.2, nextIssue: 20, asked: new Set(), paused: false, over: false, clockAt: -1, sec: -1,
+      busAt: day >= 4 && !night ? 40 + Math.random() * 50 : Infinity, burst: 0, nextBurst: 0, busLeft: 0, busLost: false,
       rooms, desk: [], pendingOut: [], maxMaids: 2 + this.save.up.maid, clean: cleanTime(this.save.up.speed), coffee: coffeeMul(this.save.up.coffee),
       msg: night ? "Ночь: почти все спят, заездов мало, зато вопросы странные" : "Нажми на гостя, потом на подходящий номер",
     };
@@ -221,8 +235,19 @@ export class Game {
       if (cand.length && this.calls.length < MAX_CALLS) { this.addCall(pick(cand)); panel = true; }
       g.nextIssue = g.t + (14 + Math.random() * 14) * (g.night ? 1.5 : 1);
     }
+    // a tour bus brings three guests at once
+    if (g.t >= g.busAt && !this.world.taxiBusy) {
+      g.busAt = Infinity;
+      this.banner(`${ic("bus")} Приехал автобус с туристами!`);
+      sfx.ring();
+      this.world.vehicleArrive("bus", () => { if (this.g === g && !g.over) { g.burst = 3; g.busLeft = 3; g.nextBurst = g.t; } });
+    }
+    if (g.burst > 0 && g.t >= g.nextBurst && g.desk.length < DESK) {
+      g.burst--; g.nextBurst = g.t + 1.3;
+      this.spawnGuest({ kind: "in", type: this.randomType(), vip: false, bus: true });
+      panel = true;
+    }
     if (g.stars <= 0 || g.t >= SHIFT) return this.finish();
-    if (this.tut === "pickGuest" && g.desk.some(x => x.kind === "in" && x.state === "waiting")) panel = true;
     if (this.tut === "pickGuest" || this.tut === "checkout") this.tutorialCheck();
     if (panel) this.renderPanel();
     this.updateLive();
@@ -263,10 +288,13 @@ export class Game {
       g.asked.add(i);
       return this.spawnGuest({ kind: "ask", q: pool[i][0], answers: pool[i][1] });
     }
-    let r = Math.random() * Object.values(WEIGHT).reduce((a, b) => a + b, 0), type = "twin";
-    for (const [k, w] of Object.entries(WEIGHT)) { if ((r -= w) <= 0) { type = k; break; } }
-    if (this.tut) type = pick(["twin", "double"]);
+    const type = this.tut ? pick(["twin", "double"]) : this.randomType();
     this.spawnGuest({ kind: "in", type, vip: !this.tut && g.day >= 2 && Math.random() < 0.12 });
+  }
+  randomType() {
+    let r = Math.random() * Object.values(WEIGHT).reduce((a, b) => a + b, 0);
+    for (const [k, w] of Object.entries(WEIGHT)) if ((r -= w) <= 0) return k;
+    return "twin";
   }
   spawnGuest(spec) {
     const g = this.g, w = this.world;
@@ -284,6 +312,7 @@ export class Game {
       actor.walkTo(path.concat([SLOTS[Math.max(0, g.desk.indexOf(x))]]), () => this.arrived(x));
     };
     if (fromLift) { w.liftCycle(); go(SPOT.elevator, [SPOT.elevatorFront, MID]); }
+    else if (spec.bus) go(TAXI_DOOR, [SPOT.entrance, SPOT.door, FRONT_TURN]);
     else {
       // new guests arrive by taxi, or walk along the sidewalk
       const viaTaxi = Math.random() < 0.6 && w.taxiArrive(() => { if (this.g === g && !g.over && x.state === "arriving" && g.desk.includes(x)) go(TAXI_DOOR, [SPOT.entrance, SPOT.door, FRONT_TURN]); });
@@ -333,6 +362,7 @@ export class Game {
     const g = this.g, pos = x.actor ? x.actor.screenPos(0.9) : null;
     this.removeFromDesk(x);
     if (x.kind === "out") Object.assign(g.rooms.find(r => r.num === x.room), { state: "dirty", due: false, issue: "", fixUntil: 0 });
+    if (x.bus) g.busLost = true;
     this.lose(x.vip ? 2 : 1, x.kind === "out" ? `Гость из ${x.room} ушёл, не дождавшись выезда` : x.vip ? "VIP-гость ушёл — минус две звезды!" : "Гость ушёл недовольным — минус звезда", pos, true);
     if (x.actor) x.actor.play("emote-no", { once: true, then: () => this.exitTo(x, x.kind === "ask" ? "lift" : "out", true) });
   }
@@ -389,7 +419,9 @@ export class Game {
     this.checkin(x, room);
   }
   checkin(x, room) {
-    const g = this.g, upgrade = room.type === "suite" && x.type !== "suite", pay = PRICE[x.type] * (x.vip ? 3 : 1);
+    const g = this.g, upgrade = room.type === "suite" && x.type !== "suite", base = Math.round(PRICE[x.type] * (x.vip ? 3 : 1) * (1 + 0.15 * this.save.up.promo));
+    // guests served while most of their patience is left pay a little extra
+    const quick = x.patience / x.max > 0.8 ? Math.round(base * 0.2) : 0, pay = base + quick;
     const stay = g.night ? 60 + Math.random() * 60 : 22 + Math.random() * 20;
     Object.assign(room, { state: "occupied", due: false, from: g.t, until: g.t + stay, issue: "", fixUntil: 0 });
     g.money += pay; g.served++;
@@ -401,6 +433,8 @@ export class Game {
     sfx.ding(); sfx.coin(); this.vibrate(15);
     this.fx(pos, `+${pay}`, "coin");
     this.fx({ x: pos.x - 20, y: pos.y - 14 }, ic("heart"), "emo heart");
+    if (quick) this.fx({ x: pos.x + 26, y: pos.y - 30 }, `${ic("fast")} быстро!`, "quick");
+    if (x.bus && --g.busLeft === 0 && !g.busLost) { this.save.stats.buses++; this.banner(`${ic("bus")} Все туристы заселены!`); }
     if (upgrade) { g.upgrades++; this.save.stats.upgrades++; if (g.stars < 5) { g.stars++; this.fx({ x: pos.x, y: pos.y - 26 }, "+1★", "star"); } this.flash(`Апгрейд в люкс ${room.num}! Гость в восторге`, "good"); }
     else this.flash(`${x.vip ? "VIP заселён" : "Заселён"} в ${room.num}, +${pay}`, "good");
     this.served(pos);
@@ -439,7 +473,7 @@ export class Game {
     this.removeFromDesk(x);
     if (i === 0) {
       g.money += 15; g.answers++; this.save.stats.answers++; sfx.coin(); this.fx(pos, "+15", "coin");
-      this.flash("Отличный ответ! +15", "good"); this.served(pos);
+      this.flash("Отличный ответ! +15", "good"); this.served(pos); this.renderHud();
       x.actor.play("emote-yes", { once: true, then: () => this.exitTo(x, "lift") });
     } else {
       this.lose(1, `Лучше было: «${x.answers[0]}»`, pos);
@@ -452,6 +486,7 @@ export class Game {
     const x = this.g.desk.find(y => y.id === this.sel);
     if (!x) return;
     this.removeFromDesk(x);
+    if (x.bus) this.g.busLost = true;
     this.flash("Извинились и подсказали другой отель — гость ушёл без обид");
     this.exitTo(x, "out");
     this.renderPanel();
@@ -506,8 +541,8 @@ export class Game {
     this.flash(`Звонок из ${room.num}: ${room.issue}`);
   }
   tapCall(c) {
-    const g = this.g, tech = this.staff.tech;
-    if (tech.busy) { sfx.error(); return this.flash("Техник занят — подожди"); }
+    const g = this.g, tech = this.staff.techs.slice(0, 1 + this.save.up.tech).find(t => !t.busy);
+    if (!tech) { sfx.error(); return this.flash(this.save.up.tech ? "Оба техника заняты — подожди" : "Техник занят — подожди"); }
     tech.busy = true;
     this.calls = this.calls.filter(y => y !== c); c.label.remove();
     const room = g.rooms.find(r => r.num === c.room);
@@ -535,6 +570,7 @@ export class Game {
       if (g.stars === 5) this.save.stats.perfect++;
     }
     if (this.tut) { this.save.tutorialDone = true; this.tut = null; }
+    g.finale = g.passed && g.day === FINAL_DAY;
     this.persist();
     this.select(null);
     g.passed ? sfx.fanfare() : sfx.fail();
@@ -569,9 +605,17 @@ export class Game {
     $("#fx").appendChild(el);
     setTimeout(() => el.remove(), 1300);
   }
+  // Big message across the top of the lobby
+  banner(html) {
+    const el = document.createElement("div");
+    el.className = "banner"; el.innerHTML = html;
+    $("#fx").appendChild(el);
+    setTimeout(() => el.remove(), 2600);
+  }
   renderHud() {
     const g = this.g, hud = $("#hud-top");
     if (!g) { hud.innerHTML = ""; return; }
+    if (!g.goalHit && !g.over && g.money >= g.goal) { g.goalHit = true; sfx.star(); this.banner(`${ic("trophy")} Цель смены выполнена!`); }
     const pct = Math.min(100, g.money / g.goal * 100);
     hud.innerHTML = `
       <div class="hud-pill"><span id="hudTime">${ic("clock")} ${mmss(SHIFT - g.t)}</span></div>
@@ -595,7 +639,8 @@ export class Game {
       <div class="rooms ${g.rooms.length > 8 ? "many" : ""}">${g.rooms.map(r => this.roomTile(r, sel)).join("")}</div>
       <div class="staffbar">
         <span>${ic("broom")} Горничные: ${Array.from({ length: g.maxMaids }, (_, i) => `<i class="dot ${i < maidsFree ? "on" : ""}"></i>`).join("")}</span>
-        ${g.day >= 3 ? `<span>${ic("wrench")} Техник: ${this.staff.tech.busy ? "занят" : "свободен"}</span>` : ""}
+        ${g.day >= 3 ? `<span>${ic("wrench")} Техник: ${this.staff.techs.slice(0, 1 + this.save.up.tech).map(t => `<i class="dot ${t.busy ? "" : "on"}"></i>`).join("")}</span>` : ""}
+        <span class="streak" title="6 гостей подряд без потерь возвращают звезду">${ic("star")} ${Array.from({ length: 6 }, (_, i) => `<i class="dot gold ${i < g.streak ? "on" : ""}"></i>`).join("")}</span>
         ${g.pendingOut.length ? `<span class="warn">${ic("bag")} Ждут выезда: ${g.pendingOut.length}</span>` : ""}
       </div>`;
     this.world.setKeys(g.rooms.map(r => r.state !== "occupied"));
@@ -616,7 +661,13 @@ export class Game {
   // Every frame: timers, patience bars, labels for phone calls
   updateLive() {
     const g = this.g;
-    const t = $("#hudTime"); if (t) t.innerHTML = `${ic("clock")} ${mmss(SHIFT - g.t)}`;
+    const left = Math.ceil(SHIFT - g.t);
+    if (left !== g.sec) {
+      g.sec = left;
+      const t = $("#hudTime");
+      if (t) { t.innerHTML = `${ic("clock")} ${mmss(left)}`; t.parentElement.classList.toggle("low", left <= 15); }
+      if (left <= 5 && left > 0) sfx.tap();
+    }
     for (const x of g.desk) if (x.patEl) { const p = x.state === "arriving" ? 100 : Math.max(0, x.patience / x.max * 100); x.patEl.style.width = p + "%"; x.patEl.className = p < 30 ? "low" : ""; }
     for (const r of g.rooms) {
       const el = document.getElementById("rb-" + r.num);
@@ -671,6 +722,8 @@ export class Game {
           <li><b>?</b> — вопрос гостя: выбери правильный ответ.</li>
           <li>Нет подходящего номера — выбери гостя и нажми «Извиниться». Звезда не снимается.</li>
           <li>6 гостей подряд без потерь возвращают звезду. Каждая третья смена — ночная.</li>
+          <li><b>Быстро!</b> Заселишь гостя, пока он почти не ждал, — получишь +20% сверху.</li>
+          <li><b>Автобус</b> (с 4-го дня) привозит сразу трёх туристов. Держи для них свободные номера.</li>
           <li><b>Камера:</b> разведи два пальца (или колесо мыши), чтобы приблизить; потяни, чтобы сдвинуть; двойное касание — вернуть.</li>
         </ul></details>`,
       ups: `<p class="note left">Кошелёк: <b>${s.wallet}</b> ${ic("coin")}. Улучшения действуют во всех следующих сменах.</p><div class="ups">${ups}</div>`,
@@ -683,7 +736,7 @@ export class Game {
         </div>
         <p class="note left">Экономная графика выключает тени — меньше греется телефон и дольше держит батарея.</p>
         <div class="foot"><button class="link" data-a="replayTut">Пройти обучение ещё раз</button><button class="link" data-a="reset">Начать карьеру заново</button></div>
-        <p class="note">Модели персонажей и мебели: Kenney.nl (CC0). 3D: three.js.</p>`,
+        <p class="note">Hotel Rush ${VERSION}. Модели персонажей и мебели: Kenney.nl (CC0). 3D: three.js.</p>`,
     }[tab];
     this.overlay(`<div class="sheet hub"><div class="brand">Hotel <b>Rush</b></div>${tabs}<div class="tab-body">${body}</div></div>`, "hub-ov");
   }
@@ -706,8 +759,28 @@ export class Game {
   }
   showPause() {
     sfx.music(false);
+    const st = this.save.settings, tgl = (key, icon, label) => `<button class="tgl ${st[key] ? "on" : ""}" data-set="${key}">${ic(icon)}<span>${label}</span><i></i></button>`;
     this.overlay(`<div class="sheet small-card"><h2>Пауза</h2><p class="note">Время смены остановлено.</p>
+      <div class="opts">${tgl("sound", "sound", "Звуки")}${tgl("music", "music", "Музыка")}</div>
       <button class="btn big" data-a="resume">Продолжить</button><button class="btn ghost" data-a="quit">Закончить смену</button></div>`, "center");
+  }
+  showFinale() {
+    const s = this.save;
+    this.g.finale = false;
+    sfx.fanfare();
+    this.overlay(`<div class="sheet small-card result win">
+      <div class="res-ic">${ic("crown")}</div>
+      <h2>Вы — управляющий отелем!</h2>
+      <p class="note">${FINAL_DAY} дней позади. Отель процветает, гости довольны, а на стойке теперь работает ваша команда.</p>
+      <div class="res-grid">
+        <div><span>Гостей заселено</span><b>${s.stats.served}</b></div>
+        <div><span>VIP-гостей</span><b>${s.stats.vips}</b></div>
+        <div><span>Рекорд смены</span><b>${s.best}</b></div>
+        <div><span>Смен на 5 звёзд</span><b>${s.stats.perfect}</b></div>
+      </div>
+      <p class="note">Карьера продолжается: дальше цели растут медленно, играть можно сколько угодно.</p>
+      <button class="btn big" data-a="hub">Играть дальше</button>
+    </div>`, "center");
   }
   showResult() {
     const g = this.g;
@@ -748,7 +821,7 @@ export class Game {
     if (key === "music") this.musicNow();
     if (key === "vibe" && st.vibe) this.vibrate(30);
     this.persist();
-    this.showHub("opts");
+    if (this.g && this.g.paused) this.showPause(); else this.showHub("opts");
   }
 
   /* ---------- input ---------- */
@@ -772,12 +845,12 @@ export class Game {
         if (a === "pause" && this.g) { this.g.paused = true; return this.showPause(); }
         if (a === "resume" && this.g) { this.g.paused = false; this.musicNow(); return this.closeOverlay(); }
         if (a === "quit" && this.g) { this.g.paused = false; return this.finish(); }
-        if (a === "hub") return this.showHub();
+        if (a === "hub") return this.g && this.g.finale ? this.showFinale() : this.showHub();
         if (a === "decline") return this.decline();
         if (a === "replayTut") { this.save.tutorialDone = false; this.persist(); return this.showHub("career"); }
         if (a === "reset") {
           if (!confirm("Начать карьеру заново? День, кошелёк и улучшения обнулятся. Рекорд и награды сохранятся.")) return;
-          this.save = { ...this.save, day: 1, wallet: 0, guests: 0, passed: 0, imported: false, up: { maid: 0, speed: 0, coffee: 0, floor: 0 } };
+          this.save = { ...this.save, day: 1, wallet: 0, guests: 0, passed: 0, imported: false, up: NO_UPGRADES() };
           this.persist(); return this.showHub();
         }
       }
